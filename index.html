@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@4.x/css/materialdesignicons.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.min.css" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui">
+    <link rel="manifest" href="manifest.webmanifest">
+    <script src="index.js"></script>
+    <title>Document</title>
+</head>
+
+<body>
+    <audio id="audio-denied" controls style="display: none;">
+        <source type="audio/wav" src="access-denied.ogg">
+    </audio>
+    <audio id="audio-granted" controls style="display: none;">
+        <source type="audio/wav" src="access-granted.ogg">
+    </audio>
+    <v-app id="app">
+        <v-main>
+            <v-container>
+                <v-card class="mx-auto my-12" max-width="374">
+                    <template slot="progress">
+                        <v-progress-linear color="deep-purple" height="10" indeterminate></v-progress-linear>
+                    </template>
+                    <v-img height="250" id="webcam-container">
+                        <canvas width="400" height="250" style="position:absolute;">
+                        </canvas>
+                    </v-img>
+                    <v-card-title>
+                        <pre>{{protectionType}}</pre>
+                    </v-card-title>
+                    <v-card-text>
+                        <v-row align="center" class="mx-0">
+                            <v-rating :value=stars color="amber" dense half-increments readonly size="14" id="rating">
+                            </v-rating>
+
+                            <div class="grey--text ml-4">
+                                <div id="label-container"></div>
+                            </div>
+                        </v-row>
+                        <div class="my-4 subtitle-2" id="access">
+                            <pre style="font-size: 20px;">{{access}}</pre>
+                        </div>
+                        <div>
+                            <pre>{{details}}</pre>
+                        </div>
+                    </v-card-text>
+                    <v-divider class="mx-4"></v-divider>
+                    <v-card-actions>
+
+                    </v-card-actions>
+                </v-card>
+                <v-img height="141" src="bg512.png"></v-img>
+                <v-img width="48" height="23" src="logo.png" style="position: relative; left: 85%; margin-top: 5%;">
+                </v-img>
+            </v-container>
+        </v-main>
+    </v-app>
+</body>
+
+</html>
+
+<script src="https://cdn.jsdelivr.net/npm/vue@2.x/dist/vue.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+<script>
+    new Vue({
+        el: '#app',
+        data: {
+            model: "",
+            webcam: "",
+            labelContainer: "",
+            maxPredictions: "",
+            protectionType: "",
+            access: "",
+            details: "",
+            stars: 0,
+            btnStart: document.querySelector("#btnStart")
+        },
+        vuetify: new Vuetify(),
+        methods: {
+            async init() {
+                const canvas = document.querySelector("canvas")
+                const context = canvas.getContext("2d")
+                const modelURL = "model.json";
+                const metadataURL = "metadata.json";
+                // load the model and metadata
+                // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
+                // or files from your local hard drive
+                // Note: the pose library adds "tmImage" object to your window (window.tmImage)
+                this.model = await tmImage.load(modelURL, metadataURL);
+                this.maxPredictions = this.model.getTotalClasses();
+
+                // Convenience function to setup a webcam
+                const flip = false; // whether to flip the webcam
+                this.webcam = new tmImage.Webcam(400, 250, flip); // width, height, flip
+                await this.webcam.setup(); // request access to the webcam
+                await this.webcam.play();
+                window.requestAnimationFrame(this.loop);
+                // append elements to the DOM
+                document.getElementById("webcam-container").appendChild(this.webcam.canvas);
+                
+                this.labelContainer = document.getElementById("label-container");
+                for (let i = 0; i < this.maxPredictions; i++) { // and class labels
+                    this.labelContainer.appendChild(document.createElement("div"));
+                }
+            },
+            async loop() {
+                this.webcam.update(); // update the webcam frame
+                await this.predict();
+                window.requestAnimationFrame(this.loop);
+            },
+            async predict() {
+                // predict can take in an image, video or canvas html element
+                const prediction = await this.model.predict(this.webcam.canvas);
+                for (let i = 0; i < this.maxPredictions; i++) {
+                    this.evaluate(prediction[i])
+                }
+            },
+            evaluate(prediction) {
+                const canvas = document.querySelector("canvas")
+                const context = canvas.getContext("2d")
+                if (prediction.className === "sin proteccion" && prediction.probability.toFixed(2) == 1) {
+                    document.querySelector("#access").style.color = "red"
+                    this.access = "ACCESO NO PERMITIDO."
+                    this.protectionType = "Usuario no usa cubrebocas o \n incorrectamente"
+                    this.details = "Revise su equipo de\nprotección antes de ingresar."
+                    this.stars = 0
+                    context.strokeStyle = "#E74C3C"
+                    context.stroke();
+                }
+                if (prediction.className === "proteccion segura" && prediction.probability.toFixed(2) == 1) {
+                    document.querySelector("#access").style.color = "green"
+                    this.access = "ACCESO PERMITIDO."
+                    this.protectionType = `Usuario con cubrebocas \ncolocado correctamente.`
+                    this.details = "Protección Segura"
+                    this.stars = 3
+                    context.strokeStyle = "#27AE60"
+                    context.stroke();
+                }
+                if (prediction.className === "empty" && prediction.probability.toFixed(2) == 1) {
+                    document.querySelector("#access").style.color = "orange"
+                    this.access = "Coloquese frente a la camara"
+                    this.protectionType = "Coloquese frente a la camara"
+                    this.details = "Coloquese frente a la camara"
+                    this.stars = 0
+                    context.strokeStyle = "#F1C40F"
+                    context.stroke();
+                }
+            },
+            drawRect() {
+                const canvas = document.querySelector("canvas")
+                const context = canvas.getContext("2d")
+                context.rect(100,10, 170, 230);
+            }
+        },
+        mounted() {
+            this.init();
+            this.drawRect()
+
+        }
+    })
+</script>
